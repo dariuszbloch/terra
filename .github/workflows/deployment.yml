@@ -1,26 +1,39 @@
-provider "azurerm" {
-  features {}
-  subscription_id = var.subscription_id
-}
+name: Deploy AKS and Nginx
 
-resource "azurerm_resource_group" "terraform-aks-rg" {
-  name     = "gh-terraform-aks"
-  location = "westeurope"
-}
+on:
+  push:
+    branches: [ main ]
 
-resource "azurerm_kubernetes_cluster" "aks" {
-  name                = "terraform-aks-demo"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  dns_prefix          = "ghaks"
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
 
-  default_node_pool {
-    name       = "default"
-    node_count = 1
-    vm_size    = "Standard_B2s"
-  }
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
-  identity {
-    type = "SystemAssigned"
-  }
-}
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+
+    - name: Azure login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Init & Apply Terraform
+      working-directory: terraform
+      run: |
+        terraform init
+        terraform apply -auto-approve -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials \
+          --resource-group ${{ secrets.RESOURCE_GROUP }} \
+          --name ${{ secrets.CLUSTER_NAME }}
+
+    - name: Deploy Nginx
+      run: |
+        kubectl apply -f k8s/ng_deploy.yml
+        kubectl apply -f k8s/ng_service.yml
